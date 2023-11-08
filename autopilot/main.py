@@ -97,25 +97,41 @@ def get_vm_pricing_details(sku_name, region):
     params = {
         "currencyCode": "GBP",
         "api-version": "2023-01-01-preview",
-        "$filter": f"serviceFamily eq 'Compute' and armSkuName eq '{sku_name}' and armRegionName eq 'uksouth' and priceType eq 'Consumption'",
+        "$filter": f"serviceFamily eq 'Compute' and armSkuName eq '{sku_name}' and armRegionName eq '{region}' and priceType eq 'Consumption'",
     }
-    # print(f"Fetching pricing for SKU: {sku_name} in Region: {region}")
-    response = requests.get(api_url, params=params)
-    json_data = json.loads(response.text)
 
-    # Debugging the fetched pricing data:
-    if json_data["Items"]:
+    response = requests.get(api_url, params=params)
+
+    # Check for rate limit headers
+    if "X-Ratelimit-Limit" in response.headers:
+        limit = response.headers["X-Ratelimit-Limit"]
+        remaining = response.headers["X-Ratelimit-Remaining"]
+        reset_time = response.headers["X-Ratelimit-Reset"]
+
+        print(f"Rate Limit: {limit}")
+        print(f"Remaining Requests: {remaining}")
+        print(f"Reset Time (UTC): {reset_time}")
+
+    try:
+        json_data = json.loads(response.text)
+    except json.JSONDecodeError:
+        print("Error decoding JSON response.")
+        return None
+
+    if "Items" in json_data and json_data["Items"]:
         for item in json_data["Items"]:
-            # print(f"Found price item: SKU: {item['armSkuName']}, Price: {item['retailPrice']}")
             if (
                 item["armSkuName"].lower() == sku_name.lower()
                 and item["armRegionName"].lower() == region.lower()
             ):
                 return float(item["retailPrice"])
+    elif "Error" in json_data:
+        # Rate limit exceeded
+        print(json_data.get("Error").get("Message"))
+        exit(1)
     else:
         print("No pricing data found for the specified SKU and Region.")
 
-    # Handle the case where no matching price was found
     return None
 
 
@@ -139,11 +155,11 @@ def get_resource_pricing(resource_type, sku_name, region):
     return None
 
 
-def estimate_monthly_cost(hourly_cost):
-    return hourly_cost * 720
+def estimate_monthly_cost(hourly_cost, hours=730):
+    return hourly_cost * hours
 
 
-def list_vms():
+def list_vms(type="vm"):
     # Load active subscription
     try:
         with open(CONFIG_FILE, "r") as config_file:
@@ -162,18 +178,28 @@ def list_vms():
 
     total_monthly_cost = 0
     for vm in compute_client.virtual_machines.list_all():
-        vm_size = vm.hardware_profile.vm_size
-        region = "uksouth"
-        hourly_cost = get_vm_pricing_details(vm_size, region)
-        monthly_cost = estimate_monthly_cost(hourly_cost)
-        total_monthly_cost += monthly_cost
-
-        print(f"- VM Name: {vm.name}")
-        print(f"  Size: {vm_size}")
-        print(f"  Estimated Cost per Hour: ${hourly_cost:.2f}")
-        print(f"  Estimated Cost per Month (720 hours): ${monthly_cost:.2f}")
-
-    print(f"\nTotal Estimated Cost per Month for all VMs: ${total_monthly_cost:.2f}")
+        if type == "avd":
+            if "AVD" in vm.name:
+                vm_size = vm.hardware_profile.vm_size
+                region = "uksouth"
+                hourly_cost = get_vm_pricing_details(vm_size, region)
+                monthly_cost = estimate_monthly_cost(hourly_cost, 200)
+                total_monthly_cost += monthly_cost
+                print(
+                    f"- {type.capitalize()} Name: {vm.name} ({vm_size}) Hourly:(\u00A3{hourly_cost:.2f}) Monthly:(\u00A3{monthly_cost:.2f})"
+                )
+        if type == "vm":
+            vm_size = vm.hardware_profile.vm_size
+            region = "uksouth"
+            hourly_cost = get_vm_pricing_details(vm_size, region)
+            monthly_cost = estimate_monthly_cost(hourly_cost)
+            total_monthly_cost += monthly_cost
+            print(
+                f"- {type.capitalize()} Name: {vm.name} ({vm_size}) Hourly:(\u00A3{hourly_cost:.2f}) Monthly:(\u00A3{monthly_cost:.2f})"
+            )
+    print(
+        f"\nTotal Estimated Cost per Month for all VMs: \u00A3{total_monthly_cost:.2f}"
+    )
 
 
 def main():
@@ -202,7 +228,10 @@ def main():
     )
 
     # VM parser
-    vm_parser = subparsers.add_parser("vm", help="Manage Azure virtual machines")
+    vm_parser = subparsers.add_parser("vms", help="Manage Azure virtual machines")
+
+    # AVD parser
+    avd_parser = subparsers.add_parser("avds", help="Manage Azure Virtual Desktop")
 
     args = parser.parse_args()
 
@@ -213,8 +242,10 @@ def main():
             set_subscription(args.set)
     elif args.command == "resources":
         list_resources()
-    elif args.command == "vm":
+    elif args.command == "vms":
         list_vms()
+    elif args.command == "avds":
+        list_vms(type="avd")
 
 
 if __name__ == "__main__":
