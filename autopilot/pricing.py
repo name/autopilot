@@ -1,12 +1,38 @@
 import json
 import requests
+from functools import lru_cache
 
 
 def estimate_monthly_cost(hourly_cost, hours=730, discount=1):
     return hourly_cost * hours * discount
 
 
-def get_vm_price(sku_name, region):
+def estimate_monthly_storage_cost(size_in_gb, disk_tier):
+    # Calculate the actual cost per GB for StandardSSD_LRS
+    actual_cost_per_gb_standardssd_lrs = 8.70 / 127
+    actual_cost_per_gb_standard_lrs = 1.40 / 32
+
+    # Define cost per GB for each tier
+    tier_costs = {
+        "StandardSSD_LRS": actual_cost_per_gb_standardssd_lrs,  # Updated cost per GB
+        "Standard_LRS": actual_cost_per_gb_standard_lrs,  # £1.40 per month for 32 GiB
+        "Premium_LRS": 0.077,  # £0.077 per GiB
+    }
+
+    # Get the cost per GB for the specified disk tier
+    cost_per_gb = tier_costs.get(disk_tier)
+
+    # If the disk tier is not recognized, return None or raise an error
+    if cost_per_gb is None:
+        print(f"Unknown disk tier: {disk_tier}")
+        return None
+
+    # Calculate and return the monthly cost
+    return size_in_gb * cost_per_gb
+
+
+@lru_cache(maxsize=128)  # Cache up to 128 different (sku_name, region) combinations
+def get_resource_price(sku_name, region):
     api_url = "https://prices.azure.com/api/retail/prices"
     params = {
         "currencyCode": "GBP",

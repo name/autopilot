@@ -29,10 +29,22 @@ def main():
         "resources", help="List all resources in the current subscription"
     )
     resources_parser.add_argument(
+        "--export",
+        help="Export resource list to CSV",
+        type=str,
+        metavar="FILE",
+    )
+    resources_parser.add_argument(
         "--cost",
         help="Estimate monthly cost of all resources in the current subscription",
         type=bool,
         metavar="COST",
+    )
+    resources_parser.add_argument(
+        "--show",
+        help="Show resource details",
+        type=bool,
+        metavar="SHOW",
     )
 
     args = parser.parse_args()
@@ -45,6 +57,10 @@ def main():
     elif args.command == "resources":
         if args.cost:
             resources.list_costs()
+        elif args.export:
+            resources.export(args.export)
+        elif args.show:
+            resources.show()
         else:
             resources.list()
 
